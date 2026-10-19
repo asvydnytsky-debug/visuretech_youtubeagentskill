@@ -129,8 +129,7 @@ print(f"  [{'PASS' if ok else 'FAIL'}] auto-pick prefers premade: probed {first[
       f"wanted {PREMADE[:12]}...")
 
 # An unusable voice we picked ourselves is a note, not a failed key: another of theirs works.
-_, out, calls = run({f"text-to-speech/{PREMADE}": lambda: http(402, "payment_required")})
-code, _, _ = run({f"text-to-speech/{PREMADE}": lambda: http(402, "payment_required")})
+code, out, _ = run({f"text-to-speech/{PREMADE}": lambda: http(402, "payment_required")})
 ok = code == 0 and "Narration works. Narrate with" in out
 fail += not ok
 print(f"  [{'PASS' if ok else 'FAIL'}] a voice we chose that 402s is a note, not a blocked key "
