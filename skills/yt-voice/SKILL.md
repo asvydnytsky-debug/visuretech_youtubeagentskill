@@ -18,6 +18,7 @@ One tool lives in this folder and it runs. Use it rather than writing your own r
 ```bash
 python3 narrate.py script.md --dry-run            # the plan, no key, no network, no spend
 python3 narrate.py --check                        # which scopes the key carries
+python3 test_check.py                             # --check's own cases, network stubbed out
 python3 narrate.py --voices                       # the voices on the account
 python3 narrate.py script.md --voice <voice_id>   # synthesize
 ```
@@ -59,6 +60,13 @@ Read the result like this:
   and it lives at elevenlabs.io -> Subscription, nowhere near the key page. Do not send the user
   back to the API Keys screen for it, and do not retry: the answer will not change until they pay
   or the month rolls over.
+
+  **Check the voice before you believe a `payment_required`.** A voice the account does not hold
+  answers 402 on a free plan rather than `voice_not_found`, so the wrong probe voice looks exactly
+  like an unpaid plan. `--check` resolves a voice from `--voices` for this reason and prints which
+  one it used; if the header says `a stock fallback`, the 402 is not evidence of anything until
+  you re-run with `--voice <an id from --voices>`. Never tell someone to go pay money on the
+  strength of a probe against a voice that was never theirs.
 - `text_to_speech` is the only row that blocks narration, whether it is missing or blocked. Without
   `voices_read` you can still synthesize, but the user has to bring a voice id, because `--voices`
   is how you would otherwise get one.

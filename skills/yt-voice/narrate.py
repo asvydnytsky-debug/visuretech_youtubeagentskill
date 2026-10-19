@@ -122,7 +122,7 @@ def call(path, method="GET", body=None, raw=False, query=""):
 # A restricted key is accepted by the account and still refuses the work one scope at a time, so
 # four calls fail for four different-looking reasons and none of them says "fix the key". --check
 # asks for all of them in one go, because the useful answer is the whole row, not the first no.
-PROBE_VOICE = "21m00Tcm4TlvDq8ikWAM"   # a stock ElevenLabs voice, asked for two characters
+PROBE_VOICE = "21m00Tcm4TlvDq8ikWAM"   # last resort only - see account_voice() for why
 READ_PROBES = {"voices_read": "/voices", "models_read": "/models", "user_read": "/user/subscription"}
 SCOPES = [
     ("text_to_speech", True, "narration itself - without this nothing else matters"),
@@ -142,6 +142,43 @@ ACCOUNT_BLOCKS = {
 MARK = {"ok": "ok     ", "blocked": "BLOCKED", "missing": "MISSING"}
 
 
+def classify(e):
+    """An HTTPError from a probe, as the (state, note) the table prints."""
+    code, status, _ = fault(e)
+    if status == "missing_permissions":
+        return "missing", ""
+    if status == "invalid_api_key":
+        die(f"the value in {key()[1]} is not a key this account accepts - re-copy it from "
+            "elevenlabs.io -> Profile -> API Keys")
+    if status in ACCOUNT_BLOCKS:
+        return "blocked", status
+    # Anything else got past the scope check, so the scope is on the key. A voice id that is not
+    # on this account answers what --check asked and is not the account's problem.
+    return "ok", status or str(code)
+
+
+def voices():
+    """The account's own voices and the voices_read verdict: ([(id, name)], state, note).
+
+    Which voice the probe uses is not a detail. A voice the account does not hold answers 402
+    payment_required on a free plan, not voice_not_found - so probing with a hardcoded stranger
+    reports a working key as blocked by billing and sends the user to pay for a plan they already
+    have. Ask the account which voices are its own. One call answers both questions.
+    """
+    try:
+        payload, _ = send("/voices")
+    except urllib.error.HTTPError as e:
+        return [], *classify(e)
+    except urllib.error.URLError as e:
+        unreachable(e)
+    try:
+        vs = [(v["voice_id"], (v.get("name") or "").strip())
+              for v in (json.loads(payload).get("voices") or []) if v.get("voice_id")]
+    except (ValueError, TypeError, AttributeError):
+        vs = []
+    return vs, "ok", ""
+
+
 def probe(scope, voice):
     """Returns (state, note): "ok", "blocked" by the account, or "missing" from the key.
 
@@ -155,17 +192,7 @@ def probe(scope, voice):
         send(*args)
         return "ok", ""
     except urllib.error.HTTPError as e:
-        code, status, _ = fault(e)
-        if status == "missing_permissions":
-            return "missing", ""
-        if status == "invalid_api_key":
-            die(f"the value in {key()[1]} is not a key this account accepts - re-copy it from "
-                "elevenlabs.io -> Profile -> API Keys")
-        if status in ACCOUNT_BLOCKS:
-            return "blocked", status
-        # Anything else got past the scope check, so the scope is on the key. A voice id that is
-        # not on this account answers what --check asked and is not the account's problem.
-        return "ok", status or str(code)
+        return classify(e)
     except urllib.error.URLError as e:
         unreachable(e)
 
@@ -175,10 +202,18 @@ def check(voice, as_json):
     src = key()[1]
     if not src:
         die("no key in ELEVENLABS_API_KEY, XI_API_KEY or KEY - set one and run again")
-    voice = voice or PROBE_VOICE
+    # One /voices call, two answers: the voices_read row, and a voice id the probe can trust.
+    mine, v_state, v_note = voices()
+    if voice:
+        whose = "given with --voice"
+    elif mine:
+        whose = f"this account's own, {mine[0][1].split(' - ')[0] or 'unnamed'}"
+        voice = mine[0][0]
+    else:
+        voice, whose = PROBE_VOICE, "a stock fallback - no voice list to ask"
     rows = []
     for scope, required, needed_for in SCOPES:
-        state, note = probe(scope, voice)
+        state, note = (v_state, v_note) if scope == "voices_read" else probe(scope, voice)
         rows.append({"scope": scope, "required": required, "needed_for": needed_for,
                      "state": state, "note": note})
     missing = [r["scope"] for r in rows if r["state"] == "missing"]
@@ -188,12 +223,13 @@ def check(voice, as_json):
     stopped = [r["scope"] for r in rows if r["state"] != "ok" and r["required"]]
 
     if as_json:
-        print(json.dumps({"key_from": src, "probe_voice": voice, "scopes": rows,
+        print(json.dumps({"key_from": src, "probe_voice": voice, "probe_voice_source": whose,
+                          "scopes": rows,
                           "missing": missing, "blocked": [r["scope"] for r in blocked],
                           "can_narrate": not stopped}, indent=1))
         return 1 if stopped else 0
 
-    print(f"\n  key read from {src}, voice {voice} for the text_to_speech probe\n")
+    print(f"\n  key read from {src}; text_to_speech probed with {voice} ({whose})\n")
     for r in rows:
         print(f"    {r['scope']:<16} {MARK[r['state']]} {r['note']:<17} {r['needed_for']}")
 
@@ -213,6 +249,10 @@ def check(voice, as_json):
         print("  Nothing about the key or this repo will change that - it is fixed at")
         print("  elevenlabs.io -> Subscription. --quota reads the balance; --dry-run still")
         print("  costs nothing and still prints the plan.")
+        if r["note"] == "payment_required" and whose.startswith("a stock"):
+            print("  Read this one twice, though: the voice above is not from your account, and a")
+            print("  voice the account does not hold answers 402 on a free plan. Re-run with")
+            print("  --voice <an id from --voices> before you believe the billing story.")
 
     print(f"\n  {'Narration is blocked: ' + ', '.join(stopped) + '.' if stopped else 'Narration itself works; what is listed above only costs you the flags named.'}\n")
     return 1 if stopped else 0
