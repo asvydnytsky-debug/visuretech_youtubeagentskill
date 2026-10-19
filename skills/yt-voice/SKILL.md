@@ -80,8 +80,10 @@ apart on purpose. Never report a key as working off the scope list alone.
    register is worse than no read, because they will hear it and not know why it is wrong. If the
    file says they appear on camera and swear, a clean corporate voice is the wrong pick and you
    should say so rather than quietly shipping it.
-2. **Pick the voice with the user, not for them.** Run `--voices` and show the list. Without
-   `--voice` the tool prints the plan and stops instead of guessing an id - leave it that way.
+2. **Pick the voice with the user, not for them.** If `voice.md` names a `voice_id`, use that and
+   say which one you used, so a choice made once is not re-litigated every run. Otherwise run
+   `--voices` and show the list. Without `--voice` the tool prints the plan and stops instead of
+   guessing an id - leave it that way. A voice id is not a guess you are allowed to make.
 3. **Check the script is final.** Synthesizing a draft means paying twice.
 
 ## What the tool strips, and why it matters

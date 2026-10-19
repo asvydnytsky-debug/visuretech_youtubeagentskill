@@ -31,3 +31,14 @@ skills refuse them for you instead of you catching it in the edit.
 
 Length, how a video opens, whether there is an intro, whether you swear, whether you appear on
 camera, what the desk looks like.
+
+## The voice that reads it, when it is not me
+
+Only `/yt-voice` reads this section, and only when you are not reading the script yourself. Name
+the voice once and you stop being asked every run:
+
+    voice_id: <an id from narrate.py --voices>
+    model: eleven_multilingual_v2
+
+Leave it empty if you read your own scripts. On a face-to-camera channel your own voice is the
+product, and an empty section here is the right answer rather than a gap to fill.
