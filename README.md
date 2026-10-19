@@ -79,6 +79,7 @@ python3 skills/yt-chapters/chapters.py transcript.srt          # validated chapt
 python3 skills/yt-retention/retention.py retention.csv         # where they left, and why
 python3 skills/yt-viral/swipe.py collected.json --min 2.0      # outliers by own-channel multiple
 python3 skills/yt-voice/narrate.py script.md --dry-run         # voiceover plan + cost, no key
+python3 skills/yt-voice/narrate.py --check                     # what your ElevenLabs key may do
 ```
 
 ## The fine print
@@ -102,6 +103,11 @@ its views.
 
 **`/yt-viral` reads, it does not scrape.** Public listings only. It never logs in as you and never
 touches your credentials.
+
+**A restricted ElevenLabs key fails four different ways.** It is accepted by the account and then
+refuses one scope at a time, so the quota call, the voice list and the synthesis each come back 401
+with their own wording and none of them says the key is fine. `narrate.py --check` asks for every
+scope at once and names the ones to turn on.
 
 **`/yt-voice` spends your money and nothing else here does.** It bills characters to your ElevenLabs
 account, so `narrate.py --dry-run` runs with no key and no network and prints the exact character

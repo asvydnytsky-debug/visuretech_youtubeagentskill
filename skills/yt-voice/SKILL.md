@@ -17,6 +17,7 @@ One tool lives in this folder and it runs. Use it rather than writing your own r
 
 ```bash
 python3 narrate.py script.md --dry-run            # the plan, no key, no network, no spend
+python3 narrate.py --check                        # which scopes the key carries
 python3 narrate.py --voices                       # the voices on the account
 python3 narrate.py script.md --voice <voice_id>   # synthesize
 ```
@@ -33,6 +34,29 @@ seen that number and said go.
 
 The key comes from `ELEVENLABS_API_KEY`, `XI_API_KEY` or `KEY`. Never ask the user to paste a key
 into the chat, and never write one into a file in the repo.
+
+## When the key is in place and it still says no
+
+An ElevenLabs key can be *restricted*: the account accepts it and then refuses each operation
+separately, one scope at a time. `--quota` fails on `user_read`, `--voices` on `voices_read`,
+synthesis on `text_to_speech`, and nothing in any one of those messages says the key itself is
+whole. Three different 401s, one cause.
+
+**Run `--check` before you debug anything else.** It probes every scope the pack uses in one pass
+and prints the row, so a restricted key is one fix instead of four. It costs two characters, once,
+and only when `text_to_speech` is actually there to bill them.
+
+Read the result like this:
+
+- `invalid_api_key` - the string is wrong. Re-copy it; a trailing newline or a wrapping quote is
+  usually what happened.
+- `missing_permissions` - the string is right and the scope is not on the key. The user adds it at
+  elevenlabs.io -> Profile -> API Keys -> the key -> scopes, or makes an unrestricted key. You
+  cannot fix this from here, and re-running will not change it: say which scopes are missing and
+  stop.
+- `text_to_speech` missing is the only one that blocks narration. Without `voices_read` you can
+  still synthesize, but the user has to bring a voice id, because `--voices` is how you would
+  otherwise get one.
 
 ## Before you synthesize
 

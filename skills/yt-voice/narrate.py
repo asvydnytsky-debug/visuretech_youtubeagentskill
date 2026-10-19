@@ -5,6 +5,7 @@
     python3 narrate.py script.md --voice <voice_id> # synthesize
     python3 narrate.py --voices                     # the voices on your account
     python3 narrate.py --quota                      # characters left this month
+    python3 narrate.py --check                      # which scopes your key actually carries
 
 Takes the script /yt-script wrote and strips it back to the words you would actually say: the
 `[ON SCREEN: ...]` directions, the beat headers, the timestamps and the markdown all come out, because
@@ -18,7 +19,9 @@ Continuity across those cuts is handled rather than assumed: each request carrie
 previous beat and the head of the next one as context, plus the previous request ids, so the voice
 does not reset its prosody at every file boundary.
 
-Reads the key from ELEVENLABS_API_KEY, XI_API_KEY or KEY, in that order.
+Reads the key from ELEVENLABS_API_KEY, XI_API_KEY or KEY, in that order. A restricted key is
+accepted by the account and then refuses one scope at a time, which reads as several unrelated
+failures; `--check` asks for all of them at once and tells you which single thing to fix.
 
 WHAT IT DOES NOT DO. It does not publish, it does not edit, and it does not stitch. It writes mp3s
 and a `concat.txt`, and you run ffmpeg if you want one file. It never invents a voice id - without
@@ -61,7 +64,8 @@ def key():
     return None, None
 
 
-def call(path, method="GET", body=None, raw=False, query=""):
+def send(path, method="GET", body=None, query=""):
+    """One request, raw and unforgiving. Both callers below want a different failure."""
     k, src = key()
     if not k:
         die("no key in ELEVENLABS_API_KEY, XI_API_KEY or KEY - export one and run again")
@@ -72,30 +76,117 @@ def call(path, method="GET", body=None, raw=False, query=""):
         headers["content-type"] = "application/json"
     req = urllib.request.Request(API + path + query, data=data, headers=headers, method=method)
     ctx = ssl.create_default_context(cafile=os.environ.get("SSL_CERT_FILE") or None)
+    with urllib.request.urlopen(req, context=ctx, timeout=180) as r:
+        return r.read(), dict(r.headers)
+
+
+def fault(e):
+    """An HTTPError reduced to the (code, status, message) both callers want."""
+    detail = e.read().decode("utf-8", "replace")
     try:
-        with urllib.request.urlopen(req, context=ctx, timeout=180) as r:
-            payload = r.read()
-            return (payload, dict(r.headers)) if raw else json.loads(payload)
+        d = json.loads(detail).get("detail", {})
+        return e.code, d.get("status", ""), (d.get("message") or d.get("status") or detail)
+    except Exception:
+        return e.code, "", detail[:300]
+
+
+def unreachable(e):
+    die(f"cannot reach {API}: {e.reason}\n"
+        "  if this is a sandbox, api.elevenlabs.io has to be an allowed host")
+
+
+def call(path, method="GET", body=None, raw=False, query=""):
+    try:
+        payload, headers = send(path, method, body, query)
+        return (payload, headers) if raw else json.loads(payload)
     except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", "replace")
-        try:
-            d = json.loads(detail).get("detail", {})
-            msg = d.get("message") or d.get("status") or detail
-            status = d.get("status", "")
-        except Exception:
-            msg, status = detail[:300], ""
+        code, status, msg = fault(e)
+        src = key()[1]
         hint = {
             "invalid_api_key": f"the value in {src} is not a key this account accepts - "
                                "re-copy it from elevenlabs.io -> Profile -> API Keys",
+            "missing_permissions": f"the key in {src} is a restricted key and this one scope is "
+                                   "not on it - the key itself is fine. Run --check to see every "
+                                   "scope at once, then add the missing ones at elevenlabs.io -> "
+                                   "Profile -> API Keys -> the key",
             "quota_exceeded": "the monthly character quota is spent - --dry-run costs nothing "
                               "and still shows the plan",
             "voice_not_found": "that voice id is not on this account - run --voices",
             "detected_unusual_activity": "free-tier abuse guard; this needs a paid plan",
         }.get(status, "")
-        die(f"{e.code} {status or 'error'}: {msg}" + (f"\n  {hint}" if hint else ""))
+        die(f"{code} {status or 'error'}: {msg}" + (f"\n  {hint}" if hint else ""))
     except urllib.error.URLError as e:
-        die(f"cannot reach {API}: {e.reason}\n"
-            "  if this is a sandbox, api.elevenlabs.io has to be an allowed host")
+        unreachable(e)
+
+
+# A restricted key is accepted by the account and still refuses the work one scope at a time, so
+# four calls fail for four different-looking reasons and none of them says "fix the key". --check
+# asks for all of them in one go, because the useful answer is the whole row, not the first no.
+PROBE_VOICE = "21m00Tcm4TlvDq8ikWAM"   # a stock ElevenLabs voice, asked for two characters
+READ_PROBES = {"voices_read": "/voices", "models_read": "/models", "user_read": "/user/subscription"}
+SCOPES = [
+    ("text_to_speech", True, "narration itself - without this nothing else matters"),
+    ("voices_read", False, "--voices, and so picking a voice id at all"),
+    ("models_read", False, "naming a --model other than the default"),
+    ("user_read", False, "--quota, and nothing else"),
+]
+
+
+def probe(scope, voice):
+    """Is this scope on the key? Returns (present, note). Bills two characters, once, for TTS."""
+    if scope == "text_to_speech":
+        args = (f"/text-to-speech/{voice}", "POST", {"text": "ok", "model_id": DEFAULT_MODEL})
+    else:
+        args = (READ_PROBES[scope], "GET", None)
+    try:
+        send(*args)
+        return True, ""
+    except urllib.error.HTTPError as e:
+        code, status, _ = fault(e)
+        if status == "missing_permissions":
+            return False, ""
+        if status == "invalid_api_key":
+            die(f"the value in {key()[1]} is not a key this account accepts - re-copy it from "
+                "elevenlabs.io -> Profile -> API Keys")
+        # Anything else got past the scope check, so the scope is there. A voice id that is not
+        # on this account, or a quota already spent, both answer the question --check asked.
+        return True, status or str(code)
+    except urllib.error.URLError as e:
+        unreachable(e)
+
+
+def check(voice, as_json):
+    """Every scope this pack uses, in one pass, so a restricted key is one fix and not four."""
+    src = key()[1]
+    if not src:
+        die("no key in ELEVENLABS_API_KEY, XI_API_KEY or KEY - set one and run again")
+    voice = voice or PROBE_VOICE
+    rows = []
+    for scope, required, needed_for in SCOPES:
+        present, note = probe(scope, voice)
+        rows.append({"scope": scope, "required": required, "needed_for": needed_for,
+                     "present": present, "note": note})
+    missing = [r["scope"] for r in rows if not r["present"]]
+    blocked = [r["scope"] for r in rows if not r["present"] and r["required"]]
+
+    if as_json:
+        print(json.dumps({"key_from": src, "probe_voice": voice, "scopes": rows,
+                          "missing": missing, "can_narrate": not blocked}, indent=1))
+        return 1 if blocked else 0
+
+    print(f"\n  key read from {src}, voice {voice} for the text_to_speech probe\n")
+    for r in rows:
+        print(f"    {r['scope']:<16} {'ok     ' if r['present'] else 'MISSING'} "
+              f"{r['note']:<10} {r['needed_for']}")
+    if not missing:
+        print("\n  Every scope this pack uses is on the key. Nothing here is in your way.\n")
+        return 0
+    print(f"\n  {len(missing)} of {len(rows)} missing: {', '.join(missing)}.")
+    print("  The key is valid - these are scopes it was created without. Add them at")
+    print("  elevenlabs.io -> Profile -> API Keys -> the key -> scopes, or make an")
+    print("  unrestricted key and put that in the secret instead.")
+    print(f"  {'Narration is blocked until text_to_speech is on the key.' if blocked else 'Narration works; the missing scopes only cost you the flags above.'}\n")
+    return 1 if blocked else 0
 
 
 def die(msg):
@@ -186,6 +277,9 @@ def main():
     a = sys.argv[1:]
     as_json = "--json" in a
     dry = "--dry-run" in a
+
+    if "--check" in a:
+        sys.exit(check(arg(a, "--voice"), as_json))
 
     if "--voices" in a:
         vs = call("/voices").get("voices", [])
