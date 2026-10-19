@@ -158,7 +158,7 @@ def classify(e):
 
 
 def voices():
-    """The account's own voices and the voices_read verdict: ([(id, name)], state, note).
+    """The account's own voices and the voices_read verdict: ([(id, name, category)], state, note).
 
     Which voice the probe uses is not a detail. A voice the account does not hold answers 402
     payment_required on a free plan, not voice_not_found - so probing with a hardcoded stranger
@@ -172,11 +172,24 @@ def voices():
     except urllib.error.URLError as e:
         unreachable(e)
     try:
-        vs = [(v["voice_id"], (v.get("name") or "").strip())
+        vs = [(v["voice_id"], (v.get("name") or "").strip(), (v.get("category") or "").strip())
               for v in (json.loads(payload).get("voices") or []) if v.get("voice_id")]
     except (ValueError, TypeError, AttributeError):
         vs = []
     return vs, "ok", ""
+
+
+def second_opinion(mine, tried):
+    """Another of the account's voices to re-probe a 402 with, premade first, or None.
+
+    A 402 on one voice does not say which of two things is wrong, and they have different
+    answers: the plan will not serve *that voice*, or the plan will not serve synthesis at all.
+    One more probe separates them for two characters, and the wrong guess here is expensive -
+    it reads as "go pay for a subscription" when the fix was to pick another voice.
+    premade first because those are the voices a free plan is allowed.
+    """
+    rest = [v for v in mine if v[0] != tried]
+    return next((v for v in rest if v[2] == "premade"), rest[0] if rest else None)
 
 
 def probe(scope, voice):
@@ -207,8 +220,9 @@ def check(voice, as_json):
     if voice:
         whose = "given with --voice"
     elif mine:
-        whose = f"this account's own, {mine[0][1].split(' - ')[0] or 'unnamed'}"
-        voice = mine[0][0]
+        pick = next((v for v in mine if v[2] == "premade"), mine[0])
+        whose = f"this account's own, {pick[1].split(' - ')[0] or 'unnamed'}"
+        voice = pick[0]
     else:
         voice, whose = PROBE_VOICE, "a stock fallback - no voice list to ask"
     rows = []
@@ -216,16 +230,35 @@ def check(voice, as_json):
         state, note = (v_state, v_note) if scope == "voices_read" else probe(scope, voice)
         rows.append({"scope": scope, "required": required, "needed_for": needed_for,
                      "state": state, "note": note})
+    # A 402 is where this check has been wrong twice, so it does not get to guess. Ask again
+    # with another of the account's voices: if that one goes through, the plan refused the voice
+    # and not the work, which is a different sentence and a different fix.
+    tts = next(r for r in rows if r["scope"] == "text_to_speech")
+    alt = None
+    if tts["state"] == "blocked" and tts["note"] == "payment_required":
+        candidate = second_opinion(mine, voice)
+        if candidate and probe("text_to_speech", candidate[0])[0] == "ok":
+            alt = candidate
+            tts["note"] = "this voice only"
+
     missing = [r["scope"] for r in rows if r["state"] == "missing"]
     blocked = [r for r in rows if r["state"] == "blocked"]
     # A scope that is present but blocked stops the work just as dead as a missing one, and
     # reporting it as "ok" is how you get a green check over a run that cannot happen.
     stopped = [r["scope"] for r in rows if r["state"] != "ok" and r["required"]]
+    # The question --check answers is "can this key narrate". If the voice was ours to pick and
+    # another of theirs works, the answer is yes and the 402 is a note about voice choice. If the
+    # user named the voice, their question was about that voice, and the answer is no.
+    asked_for_voice = whose == "given with --voice"
+    if alt and not asked_for_voice:
+        stopped = [sc for sc in stopped if sc != "text_to_speech"]
 
     if as_json:
         print(json.dumps({"key_from": src, "probe_voice": voice, "probe_voice_source": whose,
-                          "scopes": rows,
-                          "missing": missing, "blocked": [r["scope"] for r in blocked],
+                          "scopes": rows, "missing": missing,
+                          "blocked": [r["scope"] for r in blocked],
+                          "voice_that_works": alt[0] if alt else None,
+                          "blocked_by": "voice" if alt else ("account" if blocked else None),
                           "can_narrate": not stopped}, indent=1))
         return 1 if stopped else 0
 
@@ -243,18 +276,38 @@ def check(voice, as_json):
         print("  elevenlabs.io -> Profile -> API Keys -> the key -> scopes, or make an")
         print("  unrestricted key and put that in the secret instead.")
 
+    if alt:
+        print(f"\n  402 on {voice}, and {alt[0]} ({alt[1].split(' - ')[0]}, {alt[2]}) went through")
+        print("  on the same key seconds later. So this is the voice, not the plan and not the")
+        print("  balance: the account will synthesize, it just will not serve that voice. Pick")
+        print("  another from --voices, or upgrade if it has to be that one. Do not go to")
+        print("  Subscription for this - nothing there is broken.")
+
     for r in blocked:
+        if alt:
+            continue
         print(f"\n  {r['scope']} is on the key and the account refuses it anyway: "
               f"{ACCOUNT_BLOCKS[r['note']]}.")
         print("  Nothing about the key or this repo will change that - it is fixed at")
         print("  elevenlabs.io -> Subscription. --quota reads the balance; --dry-run still")
         print("  costs nothing and still prints the plan.")
-        if r["note"] == "payment_required" and whose.startswith("a stock"):
-            print("  Read this one twice, though: the voice above is not from your account, and a")
-            print("  voice the account does not hold answers 402 on a free plan. Re-run with")
-            print("  --voice <an id from --voices> before you believe the billing story.")
+        if r["note"] == "payment_required":
+            if mine:
+                print(f"  This one was re-probed against another of your {len(mine)} voices and")
+                print("  failed there too, so it is not the voice.")
+            else:
+                print("  There was no voice list to re-probe against, so this 402 may still be")
+                print("  the voice rather than the plan: a voice the account does not hold")
+                print("  answers 402 as well. Confirm with --voice <an id from --voices>.")
 
-    print(f"\n  {'Narration is blocked: ' + ', '.join(stopped) + '.' if stopped else 'Narration itself works; what is listed above only costs you the flags named.'}\n")
+    if alt and asked_for_voice:
+        print(f"\n  Narration works, but not with {voice}. Use {alt[0]}, or another premade id.\n")
+    elif alt:
+        print(f"\n  Narration works. Narrate with {alt[0]}; {voice} is not on this plan.\n")
+    elif stopped:
+        print(f"\n  Narration is blocked: {', '.join(stopped)}.\n")
+    else:
+        print("\n  Narration itself works; what is listed above only costs you the flags named.\n")
     return 1 if stopped else 0
 
 

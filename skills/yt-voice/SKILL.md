@@ -61,12 +61,22 @@ Read the result like this:
   back to the API Keys screen for it, and do not retry: the answer will not change until they pay
   or the month rolls over.
 
-  **Check the voice before you believe a `payment_required`.** A voice the account does not hold
-  answers 402 on a free plan rather than `voice_not_found`, so the wrong probe voice looks exactly
-  like an unpaid plan. `--check` resolves a voice from `--voices` for this reason and prints which
-  one it used; if the header says `a stock fallback`, the 402 is not evidence of anything until
-  you re-run with `--voice <an id from --voices>`. Never tell someone to go pay money on the
-  strength of a probe against a voice that was never theirs.
+  **A 402 is about the voice at least as often as the plan.** A voice the account's plan will not
+  serve answers `payment_required`, not `voice_not_found`, so one voice refusing looks exactly like
+  an unpaid account. `--check` re-probes a 402 against another of the account's voices before it
+  says anything, and the note column tells you which it was:
+
+  - `this voice only` - another voice went through on the same key seconds later. The account is
+    fine. Pick a different voice, or upgrade if it has to be that one. **Do not send the user to
+    Subscription**, and do not repeat the 402's own wording back to them - it is wrong here.
+  - `payment_required` with "failed there too" - every voice tried refused. Now it is the plan or
+    the balance.
+  - `payment_required` with no voice list to re-probe against - undecided. Say so; confirm with
+    `--voice <an id from --voices>` before blaming anything.
+
+  On a free plan the `premade` voices work and `professional` ones do not, so `--check` picks a
+  premade voice when it picks for itself. A `professional` or cloned voice from `--voices` being
+  listed does not mean this plan can use it.
 - `text_to_speech` is the only row that blocks narration, whether it is missing or blocked. Without
   `voices_read` you can still synthesize, but the user has to bring a voice id, because `--voices`
   is how you would otherwise get one.
