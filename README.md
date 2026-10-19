@@ -107,7 +107,9 @@ touches your credentials.
 **A restricted ElevenLabs key fails four different ways.** It is accepted by the account and then
 refuses one scope at a time, so the quota call, the voice list and the synthesis each come back 401
 with their own wording and none of them says the key is fine. `narrate.py --check` asks for every
-scope at once and names the ones to turn on.
+scope at once and names the ones to turn on. It also separates a scope the key lacks from a scope
+the account will not serve - a spent quota or an unpaid plan - because those are fixed on two
+different pages and only one of them is about the key.
 
 **`/yt-voice` spends your money and nothing else here does.** It bills characters to your ElevenLabs
 account, so `narrate.py --dry-run` runs with no key and no network and prints the exact character

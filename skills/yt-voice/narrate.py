@@ -132,25 +132,40 @@ SCOPES = [
 ]
 
 
+# Past the scope check and refused anyway: the scope is on the key and the account still cannot
+# use it. Worth its own state, because a scope is fixed on the key page and this is not.
+ACCOUNT_BLOCKS = {
+    "payment_required": "the plan or the credit balance, not the key",
+    "quota_exceeded": "this month's characters are spent",
+    "detected_unusual_activity": "the free-tier abuse guard - this needs a paid plan",
+}
+MARK = {"ok": "ok     ", "blocked": "BLOCKED", "missing": "MISSING"}
+
+
 def probe(scope, voice):
-    """Is this scope on the key? Returns (present, note). Bills two characters, once, for TTS."""
+    """Returns (state, note): "ok", "blocked" by the account, or "missing" from the key.
+
+    Bills two characters, once, and only when text_to_speech is there to bill them.
+    """
     if scope == "text_to_speech":
         args = (f"/text-to-speech/{voice}", "POST", {"text": "ok", "model_id": DEFAULT_MODEL})
     else:
         args = (READ_PROBES[scope], "GET", None)
     try:
         send(*args)
-        return True, ""
+        return "ok", ""
     except urllib.error.HTTPError as e:
         code, status, _ = fault(e)
         if status == "missing_permissions":
-            return False, ""
+            return "missing", ""
         if status == "invalid_api_key":
             die(f"the value in {key()[1]} is not a key this account accepts - re-copy it from "
                 "elevenlabs.io -> Profile -> API Keys")
-        # Anything else got past the scope check, so the scope is there. A voice id that is not
-        # on this account, or a quota already spent, both answer the question --check asked.
-        return True, status or str(code)
+        if status in ACCOUNT_BLOCKS:
+            return "blocked", status
+        # Anything else got past the scope check, so the scope is on the key. A voice id that is
+        # not on this account answers what --check asked and is not the account's problem.
+        return "ok", status or str(code)
     except urllib.error.URLError as e:
         unreachable(e)
 
@@ -163,30 +178,44 @@ def check(voice, as_json):
     voice = voice or PROBE_VOICE
     rows = []
     for scope, required, needed_for in SCOPES:
-        present, note = probe(scope, voice)
+        state, note = probe(scope, voice)
         rows.append({"scope": scope, "required": required, "needed_for": needed_for,
-                     "present": present, "note": note})
-    missing = [r["scope"] for r in rows if not r["present"]]
-    blocked = [r["scope"] for r in rows if not r["present"] and r["required"]]
+                     "state": state, "note": note})
+    missing = [r["scope"] for r in rows if r["state"] == "missing"]
+    blocked = [r for r in rows if r["state"] == "blocked"]
+    # A scope that is present but blocked stops the work just as dead as a missing one, and
+    # reporting it as "ok" is how you get a green check over a run that cannot happen.
+    stopped = [r["scope"] for r in rows if r["state"] != "ok" and r["required"]]
 
     if as_json:
         print(json.dumps({"key_from": src, "probe_voice": voice, "scopes": rows,
-                          "missing": missing, "can_narrate": not blocked}, indent=1))
-        return 1 if blocked else 0
+                          "missing": missing, "blocked": [r["scope"] for r in blocked],
+                          "can_narrate": not stopped}, indent=1))
+        return 1 if stopped else 0
 
     print(f"\n  key read from {src}, voice {voice} for the text_to_speech probe\n")
     for r in rows:
-        print(f"    {r['scope']:<16} {'ok     ' if r['present'] else 'MISSING'} "
-              f"{r['note']:<10} {r['needed_for']}")
-    if not missing:
-        print("\n  Every scope this pack uses is on the key. Nothing here is in your way.\n")
+        print(f"    {r['scope']:<16} {MARK[r['state']]} {r['note']:<17} {r['needed_for']}")
+
+    if not missing and not blocked:
+        print("\n  Every scope this pack uses is on the key and the account will serve it.\n")
         return 0
-    print(f"\n  {len(missing)} of {len(rows)} missing: {', '.join(missing)}.")
-    print("  The key is valid - these are scopes it was created without. Add them at")
-    print("  elevenlabs.io -> Profile -> API Keys -> the key -> scopes, or make an")
-    print("  unrestricted key and put that in the secret instead.")
-    print(f"  {'Narration is blocked until text_to_speech is on the key.' if blocked else 'Narration works; the missing scopes only cost you the flags above.'}\n")
-    return 1 if blocked else 0
+
+    if missing:
+        print(f"\n  {len(missing)} of {len(rows)} missing from the key: {', '.join(missing)}.")
+        print("  The key is valid - these are scopes it was created without. Add them at")
+        print("  elevenlabs.io -> Profile -> API Keys -> the key -> scopes, or make an")
+        print("  unrestricted key and put that in the secret instead.")
+
+    for r in blocked:
+        print(f"\n  {r['scope']} is on the key and the account refuses it anyway: "
+              f"{ACCOUNT_BLOCKS[r['note']]}.")
+        print("  Nothing about the key or this repo will change that - it is fixed at")
+        print("  elevenlabs.io -> Subscription. --quota reads the balance; --dry-run still")
+        print("  costs nothing and still prints the plan.")
+
+    print(f"\n  {'Narration is blocked: ' + ', '.join(stopped) + '.' if stopped else 'Narration itself works; what is listed above only costs you the flags named.'}\n")
+    return 1 if stopped else 0
 
 
 def die(msg):

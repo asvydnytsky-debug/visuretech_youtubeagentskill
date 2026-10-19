@@ -50,13 +50,21 @@ Read the result like this:
 
 - `invalid_api_key` - the string is wrong. Re-copy it; a trailing newline or a wrapping quote is
   usually what happened.
-- `missing_permissions` - the string is right and the scope is not on the key. The user adds it at
-  elevenlabs.io -> Profile -> API Keys -> the key -> scopes, or makes an unrestricted key. You
-  cannot fix this from here, and re-running will not change it: say which scopes are missing and
-  stop.
-- `text_to_speech` missing is the only one that blocks narration. Without `voices_read` you can
-  still synthesize, but the user has to bring a voice id, because `--voices` is how you would
-  otherwise get one.
+- `MISSING` / `missing_permissions` - the string is right and the scope is not on the key. The
+  user adds it at elevenlabs.io -> Profile -> API Keys -> the key -> scopes, or makes an
+  unrestricted key. You cannot fix this from here, and re-running will not change it: say which
+  scopes are missing and stop.
+- `BLOCKED` / `payment_required`, `quota_exceeded`, `detected_unusual_activity` - the scope **is**
+  on the key and the account refuses the call regardless. This is the plan or the credit balance,
+  and it lives at elevenlabs.io -> Subscription, nowhere near the key page. Do not send the user
+  back to the API Keys screen for it, and do not retry: the answer will not change until they pay
+  or the month rolls over.
+- `text_to_speech` is the only row that blocks narration, whether it is missing or blocked. Without
+  `voices_read` you can still synthesize, but the user has to bring a voice id, because `--voices`
+  is how you would otherwise get one.
+
+A scope being on the key is not the same as the account serving it, and `--check` keeps the two
+apart on purpose. Never report a key as working off the scope list alone.
 
 ## Before you synthesize
 
