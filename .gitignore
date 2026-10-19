@@ -1,0 +1,4 @@
+# Bytecode. Every tool here is run as a script, so this is never worth committing -
+# and it got committed once, because a cleanup ran before the test rather than after.
+__pycache__/
+*.py[cod]
