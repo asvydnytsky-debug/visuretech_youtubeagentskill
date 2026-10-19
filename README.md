@@ -1,7 +1,8 @@
 # The YouTube agent skill
 
-Eleven Claude skills that run a YouTube channel. Free, MIT, no signup, no API key, nothing to
-connect.
+Twelve Claude skills that run a YouTube channel. Free, MIT, no signup. Eleven of them need no API
+key and nothing to connect. The twelfth, `/yt-voice`, records the voiceover and is the only one that
+needs a key - ElevenLabs, your own account, your own characters.
 
 One of them writes your script off 21 hook formulas and scores the hook before you waste a take on
 it. One lints the title and the thumbnail as a single pairing, because writing them separately is
@@ -38,16 +39,16 @@ Or as a plugin:
 ```
 
 Project-local instead of global: copy the same folders into your repo's `.claude/skills/`. No Claude
-Code at all? Paste any single `SKILL.md` at the top of a chat and it runs as a mode. You lose the six
-Python tools, which is most of the point of `/yt-script`, `/yt-retention` and `/yt-edit`, but the
-rest works.
+Code at all? Paste any single `SKILL.md` at the top of a chat and it runs as a mode. You lose the
+seven Python tools, which is most of the point of `/yt-script`, `/yt-retention` and `/yt-edit`, but
+the rest works.
 
 Then spend ten minutes on [`templates/voice.md`](templates/voice.md). Copy it to
 `~/.claude/youtube/voice.md` and fill it in, or send Claude three of your own videos and say "write
 my voice.md from these". Every skill reads that file. It matters more here than anywhere else,
 because you have to say the words out loud.
 
-## The eleven
+## The twelve
 
 | command | what it does |
 | --- | --- |
@@ -62,11 +63,13 @@ because you have to say the words out loud.
 | `/yt-seo` | The description, the tags that are worth having, and the three queries this should win. |
 | `/yt-chapters` | Chapters from a transcript, validated against YouTube's own rules so they render. |
 | `/yt-audit` | The whole channel, ending in ONE fix rather than twenty. |
+| `/yt-voice` | A finished script into voiceover, one file per beat, cost shown before a character is spent. Needs an ElevenLabs key. |
 
-## The six tools
+## The seven tools
 
 Every one of these runs on a clean Python 3 with no dependencies. They are the reason the skills are
-not just prompts.
+not just prompts. Six of them never touch the network; `narrate.py` does, and prints what it would
+spend before it spends it.
 
 ```bash
 python3 skills/yt-script/hookscore.py --hook "one line"        # 5-property hook panel
@@ -75,6 +78,7 @@ python3 skills/yt-edit/deadair.py transcript.srt               # edit decision l
 python3 skills/yt-chapters/chapters.py transcript.srt          # validated chapters
 python3 skills/yt-retention/retention.py retention.csv         # where they left, and why
 python3 skills/yt-viral/swipe.py collected.json --min 2.0      # outliers by own-channel multiple
+python3 skills/yt-voice/narrate.py script.md --dry-run         # voiceover plan + cost, no key
 ```
 
 ## The fine print
@@ -98,6 +102,12 @@ its views.
 
 **`/yt-viral` reads, it does not scrape.** Public listings only. It never logs in as you and never
 touches your credentials.
+
+**`/yt-voice` spends your money and nothing else here does.** It bills characters to your ElevenLabs
+account, so `narrate.py --dry-run` runs with no key and no network and prints the exact character
+count first. Nothing is sent until you have seen that number. It uses voices already on your
+account and never clones one. And if you publish with a synthetic voice, YouTube's altered-content
+disclosure is yours to decide on - the skill says so in every handback rather than leaving it out.
 
 **Tags barely matter** and this pack says so instead of selling you a tag generator.
 
